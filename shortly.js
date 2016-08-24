@@ -5,6 +5,8 @@ var bodyParser = require('body-parser');
 var session = require('express-session');
 var sha1 = require('sha1');
 var bcrypt = require('bcrypt');
+var passport = require('passport');
+var GitHubStrategy = require('passport-github2').Strategy;
 
 
 var db = require('./app/config');
@@ -13,6 +15,28 @@ var User = require('./app/models/user');
 var Links = require('./app/collections/links');
 var Link = require('./app/models/link');
 var Click = require('./app/models/click');
+
+passport.serializeUser(function(user, done) {
+  done(null, user);
+});
+
+passport.deserializeUser(function(obj, done) {
+  done(null, obj);
+});
+
+passport.use(new GitHubStrategy({
+  clientID: 'cffcc7effb04ee247ed8',
+  clientSecret: '265d40eea1c890a3ada818d8bf4e4ea2cf4da7bd',
+  callbackURL: 'http://127.0.0.1:4568/callback'
+}, function(accessToken, refreshToken, profile, done) {
+
+  // console.log('accessToken', accessToken, 'refreshToken', refreshToken, 'profile', profile);
+
+  process.nextTick(function() {
+    console.log('process next tick');
+    done(null, profile);
+  });
+}));
 
 var app = express();
 
@@ -32,13 +56,30 @@ app.use(session({
   cookie: {}
 }));
 
+app.use(passport.initialize());
+app.use(passport.session());
+
 var restrict = function (req, res, next) {
-  if (req.session.name) {
-    console.log('session name', req.session.name);
+  // console.log('HELLLLLLLLO USER', req.user);
+  // console.log('rq.isauth', req.isAuthenticated());
+  if (req.user) {
     return next();
   }
+  console.log('redirecting to login');
   res.redirect(301, '/login');
 };
+
+app.get('/auth/github', passport.authenticate('github', { scope: [ 'user:email' ] }), function(req, res) {
+  // redirect user to github, so this callback will not be called
+});
+
+app.get('/callback', passport.authenticate('github', {failureRedirect: '/auth/github'}), function (req, res) {
+  // , Object.keys(req), req.user);
+  // req.session.name = req.user.username;
+  // console.log('session name', passport);
+  // console.log('response', res.body);
+  res.redirect('/');
+});
 
 app.get('/', restrict,
 function(req, res) {
@@ -50,21 +91,21 @@ function(req, res) {
   res.render('index');
 });
 
-app.get('/links', restrict,
+app.get('/links', restrict, 
 function(req, res) {
-  Users.reset().fetch().then(function(users) {
-    console.log(users.models);
-    var userId;
-    users.models.forEach(function(user) {
-      if (user.attributes.username === req.session.name) {
-        userId = user.attributes.id;
-      }
-    });
-    Links.reset().fetch({'userId': userId}).then(function(links) {
-      console.log('links', links.models);
-      res.status(200).send(links.models);
-    });
+  // Users.reset().fetch().then(function(users) {
+  //   // console.log(users.models);
+  //   var userId;
+  //   users.models.forEach(function(user) {
+  //     if (user.attributes.username === req.session.name) {
+  //       userId = user.attributes.id;
+  //     }
+  //   });
+  Links.reset().fetch().then(function(links) {
+    // console.log('links', links.models);
+    res.status(200).send(links.models);
   });
+  // });
   // Users.where('id', 5).then(function(user) {
     // console.log('user', user.attributes);
   // });
@@ -113,7 +154,7 @@ function(req, res) {
 app.get('/signup', function (req, res) {
   res.render('signup');
 });
-
+/********************* HASHED PASSWORDS ***************************/
 app.post('/signup', function (req, res) {
   var username = req.body.username;
   var password = req.body.password;
@@ -125,7 +166,7 @@ app.post('/signup', function (req, res) {
       console.log('Username already exists.');
       res.redirect(201, '/login');
     } else {
-      console.log('salt', salt);
+      // console.log('salt', salt);
       Users.create({
         username: username,
         password: hash,
@@ -142,29 +183,76 @@ app.post('/signup', function (req, res) {
 
 app.post('/login', 
 function (req, res) {
-  new User({ username: req.body.username }).fetch().then(function(user) {
-    if (user) {
-      // console.log('user', user.attributes);
-      // console.log(req.body.password, user.attributes.salt);
+  res.redirect('/auth/github');
+  // var username = req.body.username;
+  // var password = req.body.password;
+  // new User({ username: username }).fetch().then(function(user) {
+  //   if (user) {
+  //     // console.log('user', user.attributes);
+  //     // console.log(password, user.attributes.salt);
 
-      var hash = bcrypt.hashSync(req.body.password, user.attributes.salt);
+  //     var hash = bcrypt.hashSync(password, user.attributes.salt);
 
-      if (hash === user.attributes.password) {
-        console.log('logging in');
-        req.session.name = req.body.username;
-        res.redirect('/');
-      }
-    } else {
-      res.redirect('/login');
-    }
-  });
+  //     if (hash === user.attributes.password) {
+  //       console.log('logging in');
+  //       req.session.name = username;
+  //       res.redirect('/');
+  //     }
+  //   } else {
+  //     res.redirect('/login');
+  //   }
+
+
+  // });
 });
 
+/********************* PLAINTEXT PASSWORDS ***************************/
+// app.post('/signup', function (req, res) {
+//   var username = req.body.username;
+//   var password = req.body.password;
+
+//   new User({ username: username }).fetch().then(function(found) {
+//     if (found) {
+//       console.log('Username already exists.');
+//       res.redirect(201, '/login');
+//     } else {
+//       Users.create({
+//         username: username,
+//         password: password,
+//       })
+//       .then(function(newUser) {
+//         req.session.name = username;
+//         // console.log('A new user is created', newUser.attributes);
+//         res.status(200).redirect('/');
+//       });
+//     }
+//   });
+// });
+
+// app.post('/login', 
+// function (req, res) {
+//   var username = req.body.username;
+//   var password = req.body.password;
+//   new User({ username: username }).fetch().then(function(user) {
+//     if (user) {
+
+//       if (password === user.attributes.password) {
+//         // console.log('logging in');
+//         req.session.name = username;
+//         res.redirect('/');
+//       }
+//     } else {
+//       res.redirect('/login');
+//     }
+//   });
+// });
+
 app.get('/logout', function (req, res) {
-  req.session.destroy(function () {
-    res.redirect('/login');
-    console.log('logging out');
-  });
+  console.log('logging out');
+  req.logout();
+  // req.session.destroy(function () {
+  res.redirect('/login');
+  // });
 });
 
 /************************************************************/
